@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">vibe</string>
+    <string name="accessibility_service_description">Vibe monitors WhatsApp messages to detect cyberbullying and provide real-time nudges. Vibe does not store or transmit your messages - all analysis happens locally on your device.</string>
+</resources>
