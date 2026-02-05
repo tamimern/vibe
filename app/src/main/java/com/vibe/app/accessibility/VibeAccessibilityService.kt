@@ -20,9 +20,10 @@ class VibeAccessibilityService : AccessibilityService() {
     }
 
     private var isWhatsAppForeground = false
-    private var lastProcessedMessageHash: Int? = null
+    private val processedMessages = mutableSetOf<Int>()
     private val messageAnalyzer = ViewNodeAnalyzer()
     private lateinit var overlayManager: OverlayManager
+    private var currentVibeScore = 100
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -187,15 +188,15 @@ class VibeAccessibilityService : AccessibilityService() {
             val messageText = bubble.text?.toString() ?: ""
             if (messageText.isBlank()) return
 
-            val messageHash = messageText.hashCode()
-            if (messageHash == lastProcessedMessageHash) {
-                return
-            }
-            lastProcessedMessageHash = messageHash
-
-            val direction = determineMessageDirection(bubble)
             val bounds = Rect()
             bubble.getBoundsInScreen(bounds)
+            val messageHash = messageText.hashCode() + bounds.hashCode()
+            if (processedMessages.contains(messageHash)) {
+                return
+            }
+            processedMessages.add(messageHash)
+
+            val direction = determineMessageDirection(bubble)
 
             Log.d(TAG, "💬 Message detected:")
             Log.d(TAG, "   Text: ${messageText.take(50)}...")
@@ -230,13 +231,16 @@ class VibeAccessibilityService : AccessibilityService() {
 
     private fun onWhatsAppOpened() {
         Log.d(TAG, "🎯 WhatsApp monitoring started")
+        currentVibeScore = 100
         overlayManager.showMonitoringActive()
+        overlayManager.showVibeMeter(SentimentCategory.NEUTRAL, currentVibeScore)
     }
 
     private fun onWhatsAppClosed() {
         Log.d(TAG, "🎯 WhatsApp monitoring stopped")
-        lastProcessedMessageHash = null
+        processedMessages.clear()
         overlayManager.hideOverlay()
+        overlayManager.hideVibeMeter()
     }
 
     private fun onInputFieldChanged(text: String) {
@@ -245,9 +249,19 @@ class VibeAccessibilityService : AccessibilityService() {
 
     private fun onMessageDetected(analysisResult: MessageAnalysisResult) {
         Log.d(TAG, "📊 Message analyzed - Sentiment: ${analysisResult.sentiment}, Score: ${analysisResult.sentimentScore}")
-        if (analysisResult.sentiment == SentimentCategory.TOXIC || analysisResult.sentiment == SentimentCategory.AGGRESSIVE) {
-            overlayManager.showOverlay(analysisResult)
+        
+        when (analysisResult.sentiment) {
+            SentimentCategory.VIOLENCE, SentimentCategory.TOXIC, SentimentCategory.AGGRESSIVE -> {
+                currentVibeScore = (currentVibeScore - 20).coerceAtLeast(0)
+                overlayManager.showOverlay(analysisResult)
+            }
+            SentimentCategory.SUPPORTIVE -> {
+                currentVibeScore = (currentVibeScore + 10).coerceAtMost(100)
+            }
+            else -> Unit
         }
+
+        overlayManager.showVibeMeter(analysisResult.sentiment, currentVibeScore)
     }
 
     override fun onInterrupt() {
@@ -260,5 +274,6 @@ class VibeAccessibilityService : AccessibilityService() {
         Log.d(TAG, "🛑 Accessibility service destroyed")
         isWhatsAppForeground = false
         overlayManager.hideOverlay()
+        overlayManager.hideVibeMeter()
     }
 }

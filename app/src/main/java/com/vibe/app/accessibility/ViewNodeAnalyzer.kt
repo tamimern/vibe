@@ -5,14 +5,27 @@ import android.graphics.Rect
 class ViewNodeAnalyzer {
     fun analyzeMessage(text: String, direction: MessageDirection, bounds: Rect): MessageAnalysisResult {
         // Placeholder for sentiment analysis logic
-        val sentiment = if (text.contains("hate", ignoreCase = true)) {
-            SentimentCategory.TOXIC
-        } else {
-            SentimentCategory.NEUTRAL
+        val sentiment: SentimentCategory
+        val score: Float
+
+        when {
+            text.contains("kill", ignoreCase = true) -> {
+                sentiment = SentimentCategory.VIOLENCE
+                score = 0.1f // Low score for violence
+            }
+            text.contains("hate", ignoreCase = true) -> {
+                sentiment = SentimentCategory.TOXIC
+                score = 0.3f // Medium-low score for toxic
+            }
+            else -> {
+                sentiment = SentimentCategory.NEUTRAL
+                score = 0.8f // Higher score for neutral
+            }
         }
+
         return MessageAnalysisResult(
             sentiment = sentiment,
-            sentimentScore = if (sentiment == SentimentCategory.TOXIC) 0.9f else 0.5f,
+            sentimentScore = score,
             direction = direction,
             bounds = bounds
         )
@@ -47,5 +60,6 @@ enum class SentimentCategory {
     AGGRESSIVE,
     SUPPORTIVE,
     NEUTRAL,
-    EXCLUSIVE
+    EXCLUSIVE,
+    VIOLENCE
 }
