@@ -13,10 +13,7 @@ class VibeAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "VibeAccessibilityService"
         private const val WHATSAPP_PACKAGE = "com.whatsapp"
-
-        // WhatsApp-specific view identifiers (may need adjustment based on WhatsApp version)
-        private const val MESSAGE_BUBBLE_CLASS = "android.widget.TextView"
-        private const val INPUT_FIELD_CLASS = "android.widget.EditText"
+        private const val GRACE_PERIOD_MS = 2000L
     }
 
     private var isWhatsAppForeground = false
@@ -24,13 +21,13 @@ class VibeAccessibilityService : AccessibilityService() {
     private val messageAnalyzer = ViewNodeAnalyzer()
     private lateinit var overlayManager: OverlayManager
     private var currentVibeScore = 100
+    private var monitoringStartTime = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         Log.d(TAG, "✅ VibeAccessibilityService connected")
         overlayManager = OverlayManager(this)
 
-        // Configure service info
         val serviceInfo = AccessibilityServiceInfo().apply {
             eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
                     AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
@@ -40,9 +37,7 @@ class VibeAccessibilityService : AccessibilityService() {
             flags = AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
                     AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
 
-            notificationTimeout = 100 // Check every 100ms
-
-            // Only monitor WhatsApp
+            notificationTimeout = 100
             packageNames = arrayOf(WHATSAPP_PACKAGE)
         }
 
@@ -53,15 +48,9 @@ class VibeAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         try {
             when (event.eventType) {
-                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                    handleWindowStateChanged(event)
-                }
-                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
-                    handleWindowContentChanged(event)
-                }
-                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
-                    handleTextChanged(event)
-                }
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> handleWindowStateChanged(event)
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> handleWindowContentChanged(event)
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> handleTextChanged(event)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error handling accessibility event", e)
@@ -87,11 +76,12 @@ class VibeAccessibilityService : AccessibilityService() {
     }
 
     private fun handleWindowContentChanged(event: AccessibilityEvent) {
-        if (!isWhatsAppForeground) return
+        if (!isWhatsAppForeground || System.currentTimeMillis() - monitoringStartTime < GRACE_PERIOD_MS) {
+            return
+        }
 
         event.source?.let { source ->
-            val messageBubbles = findMessageBubbles(source)
-            messageBubbles.forEach { bubble ->
+            findMessageBubbles(source).forEach { bubble ->
                 processMessageBubble(bubble)
             }
         }
@@ -121,28 +111,22 @@ class VibeAccessibilityService : AccessibilityService() {
         node: AccessibilityNodeInfo,
         bubbles: MutableList<AccessibilityNodeInfo>
     ) {
-        try {
-            if (isMessageBubble(node)) {
-                bubbles.add(node)
-                return
-            }
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { child ->
-                    findMessageBubblesRecursive(child, bubbles)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in findMessageBubblesRecursive", e)
+        if (isMessageBubble(node)) {
+            bubbles.add(node)
+            return
+        }
+        for (i in 0 until node.childCount) {
+            node.getChild(i)?.let { findMessageBubblesRecursive(it, bubbles) }
         }
     }
 
     private fun isMessageBubble(node: AccessibilityNodeInfo): Boolean {
         val text = node.text?.toString()
         if (text.isNullOrBlank()) return false
+
         val className = node.className?.toString() ?: ""
-        if (!className.contains("TextView") && !className.contains("Text")) {
-            return false
-        }
+        if (!className.contains("TextView") && !className.contains("Text")) return false
+
         if (!node.isVisibleToUser) return false
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
@@ -150,20 +134,13 @@ class VibeAccessibilityService : AccessibilityService() {
 
         val width = bounds.width()
         val height = bounds.height()
-
-        if (width < 50 || height < 20) return false
-        if (width > 800 || height > 500) return false
+        if (width < 50 || height < 20 || width > 800 || height > 500) return false
 
         var parent = node.parent
         var depth = 0
         while (parent != null && depth < 5) {
             val parentClass = parent.className?.toString() ?: ""
-            val parentDesc = parent.contentDescription?.toString() ?: ""
-
-            if (parentClass.contains("RecyclerView") ||
-                parentClass.contains("ListView") ||
-                parentDesc.contains("message") ||
-                parentDesc.contains("chat")) {
+            if (parentClass.contains("RecyclerView") || parentClass.contains("ListView")) {
                 return true
             }
             parent = parent.parent
@@ -174,64 +151,40 @@ class VibeAccessibilityService : AccessibilityService() {
 
     private fun isInputField(node: AccessibilityNodeInfo): Boolean {
         val className = node.className?.toString() ?: ""
-        if (!className.contains("EditText")) return false
-        if (!node.isEditable) return false
-        val hint = node.hintText?.toString() ?: ""
-        val desc = node.contentDescription?.toString() ?: ""
-        return hint.contains("message", ignoreCase = true) ||
-                desc.contains("input", ignoreCase = true) ||
-                desc.contains("message", ignoreCase = true)
+        return className.contains("EditText") && node.isEditable
     }
 
     private fun processMessageBubble(bubble: AccessibilityNodeInfo) {
-        try {
-            val messageText = bubble.text?.toString() ?: ""
-            if (messageText.isBlank()) return
+        val messageText = bubble.text?.toString() ?: return
+        if (messageText.isBlank()) return
 
-            val bounds = Rect()
-            bubble.getBoundsInScreen(bounds)
-            val messageHash = messageText.hashCode() + bounds.hashCode()
-            if (processedMessages.contains(messageHash)) {
-                return
-            }
-            processedMessages.add(messageHash)
+        val bounds = Rect()
+        bubble.getBoundsInScreen(bounds)
+        val messageHash = messageText.hashCode() + bounds.hashCode()
 
-            val direction = determineMessageDirection(bubble)
+        if (processedMessages.contains(messageHash)) return
+        processedMessages.add(messageHash)
 
-            Log.d(TAG, "💬 Message detected:")
-            Log.d(TAG, "   Text: ${messageText.take(50)}...")
-            Log.d(TAG, "   Direction: $direction")
-            Log.d(TAG, "   Bounds: $bounds")
+        val direction = determineMessageDirection(bubble)
+        Log.d(TAG, "💬 Message detected: ${messageText.take(50)}...")
 
-            val analysisResult = messageAnalyzer.analyzeMessage(
-                text = messageText,
-                direction = direction,
-                bounds = bounds
-            )
-
-            onMessageDetected(analysisResult)
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error processing message bubble", e)
-        }
+        val analysisResult = messageAnalyzer.analyzeMessage(messageText, direction, bounds)
+        onMessageDetected(analysisResult)
     }
 
     private fun determineMessageDirection(bubble: AccessibilityNodeInfo): MessageDirection {
         val bounds = Rect()
         bubble.getBoundsInScreen(bounds)
         val screenWidth = resources.displayMetrics.widthPixels
-        val centerX = bounds.centerX()
         val rightThreshold = screenWidth * 0.6
-        return if (centerX > rightThreshold) {
-            MessageDirection.OUTGOING
-        } else {
-            MessageDirection.INCOMING
-        }
+        return if (bounds.centerX() > rightThreshold) MessageDirection.OUTGOING else MessageDirection.INCOMING
     }
 
     private fun onWhatsAppOpened() {
         Log.d(TAG, "🎯 WhatsApp monitoring started")
         currentVibeScore = 100
+        processedMessages.clear()
+        monitoringStartTime = System.currentTimeMillis()
         overlayManager.showMonitoringActive()
         overlayManager.showVibeMeter(SentimentCategory.NEUTRAL, currentVibeScore)
     }
@@ -248,20 +201,25 @@ class VibeAccessibilityService : AccessibilityService() {
     }
 
     private fun onMessageDetected(analysisResult: MessageAnalysisResult) {
-        Log.d(TAG, "📊 Message analyzed - Sentiment: ${analysisResult.sentiment}, Score: ${analysisResult.sentimentScore}")
-        
-        when (analysisResult.sentiment) {
-            SentimentCategory.VIOLENCE, SentimentCategory.TOXIC, SentimentCategory.AGGRESSIVE -> {
-                currentVibeScore = (currentVibeScore - 20).coerceAtLeast(0)
-                overlayManager.showOverlay(analysisResult)
-            }
-            SentimentCategory.SUPPORTIVE -> {
-                currentVibeScore = (currentVibeScore + 10).coerceAtMost(100)
-            }
-            else -> Unit
+        Log.d(TAG, "📊 Message analyzed - Sentiment: ${analysisResult.sentiment}, Score Change: ${analysisResult.sentimentScore}")
+
+        if (analysisResult.sentimentScore != 0.0f) {
+            currentVibeScore = (currentVibeScore + analysisResult.sentimentScore).toInt().coerceIn(0, 100)
         }
 
         overlayManager.showVibeMeter(analysisResult.sentiment, currentVibeScore)
+
+        when (analysisResult.sentiment) {
+            SentimentCategory.VIOLENCE, SentimentCategory.TOXIC, SentimentCategory.AGGRESSIVE -> {
+                overlayManager.showOverlay(analysisResult)
+            }
+            SentimentCategory.SUPPORTIVE -> {
+                overlayManager.showVibeSpark()
+            }
+            else -> {
+                overlayManager.hideOverlay()
+            }
+        }
     }
 
     override fun onInterrupt() {

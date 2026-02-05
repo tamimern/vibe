@@ -144,6 +144,37 @@ class OverlayManager(private val context: Context) {
             hideOverlay()
         }
     }
+    
+    fun showVibeSpark() {
+        hideOverlay()
+
+        composeView = ComposeView(context).apply {
+            setViewTreeLifecycleOwner(lifecycle)
+            setViewTreeSavedStateRegistryOwner(lifecycle)
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                VibeSparkOverlay()
+            }
+        }
+        
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.BOTTOM
+        }
+
+        windowManager.addView(composeView, params)
+        lifecycle?.handleLifecycleEvent(Lifecycle.Event.ON_START)
+
+        coroutineScope.launch {
+            delay(3000) // 3 seconds
+            hideOverlay()
+        }
+    }
 
     fun hideOverlay() {
         composeView?.let {
@@ -197,7 +228,7 @@ fun VibeOverlay(analysisResult: MessageAnalysisResult) {
             tint = Color.White
         )
         Text(
-            text = "שימו לב, ההודעה מסוכנת",
+            text = "Detected: ${analysisResult.sentiment}",
             color = Color.White
         )
         Box(
@@ -211,5 +242,32 @@ fun VibeOverlay(analysisResult: MessageAnalysisResult) {
                 tint = Color.Black
             )
         }
+    }
+}
+
+@Composable
+fun VibeSparkOverlay() {
+    val gradient = Brush.horizontalGradient(
+        colors = listOf(Color(0xFF34D399), Color(0xFF60A5FA)) // Mint Green to Electric Blue
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+            .background(gradient, shape = RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Icon(
+            imageVector = Icons.Default.Star,
+            contentDescription = "Vibe Spark",
+            tint = Color.White
+        )
+        Text(
+            text = "Nice one! Keep the good vibes going.",
+            color = Color.White
+        )
     }
 }

@@ -4,22 +4,25 @@ import android.graphics.Rect
 
 class ViewNodeAnalyzer {
     fun analyzeMessage(text: String, direction: MessageDirection, bounds: Rect): MessageAnalysisResult {
-        // Placeholder for sentiment analysis logic
         val sentiment: SentimentCategory
         val score: Float
 
         when {
-            text.contains("kill", ignoreCase = true) -> {
+            containsWord(text, listOf("kill", "die")) -> {
                 sentiment = SentimentCategory.VIOLENCE
-                score = 0.1f // Low score for violence
+                score = -5.0f
             }
-            text.contains("hate", ignoreCase = true) -> {
+            containsWord(text, listOf("hate", "stupid", "idiot")) -> {
                 sentiment = SentimentCategory.TOXIC
-                score = 0.3f // Medium-low score for toxic
+                score = -5.0f
+            }
+            containsWord(text, listOf("love", "great", "amazing", "thanks", "awesome", "cool", "nice")) -> {
+                sentiment = SentimentCategory.SUPPORTIVE
+                score = 5.0f
             }
             else -> {
                 sentiment = SentimentCategory.NEUTRAL
-                score = 0.8f // Higher score for neutral
+                score = 0.0f
             }
         }
 
@@ -30,20 +33,17 @@ class ViewNodeAnalyzer {
             bounds = bounds
         )
     }
+
+    private fun containsWord(text: String, words: List<String>): Boolean {
+        return words.any { word -> text.contains(word, ignoreCase = true) }
+    }
 }
 
-/**
- * Enum for message direction
- */
 enum class MessageDirection {
     INCOMING,  // Left side - messages from others
     OUTGOING   // Right side - messages from user
 }
 
-/**
- * Data class for message analysis result
- * Contains only sentiment tokens, NOT raw text
- */
 data class MessageAnalysisResult(
     val sentiment: SentimentCategory,
     val sentimentScore: Float,
@@ -52,9 +52,6 @@ data class MessageAnalysisResult(
     val bounds: Rect
 )
 
-/**
- * Sentiment categories as per PRD
- */
 enum class SentimentCategory {
     TOXIC,
     AGGRESSIVE,
