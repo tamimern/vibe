@@ -1,13 +1,13 @@
 package com.vibe.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.Icon
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -16,19 +16,24 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.vibe.app.accessibility.SentimentCategory
 
 @Composable
 fun VibeMeter(
-    sentiment: SentimentCategory,
-    score: Int
+    score: Int,
+    onClick: () -> Unit
 ) {
-    val gradient = when {
-        score > 70 -> Brush.linearGradient(
-            colors = listOf(Color(0xFF60A5FA), Color(0xFF34D399)) // Electric Blue to Mint Green
+    val (color, _) = when {
+        score >= 80 -> Color(0xFF34D399) to Brush.linearGradient(
+            colors = listOf(Color(0xFF34D399), Color(0xFF60A5FA))
         )
-        else -> Brush.linearGradient(
-            colors = listOf(Color(0xFFFB923C), Color(0xFFA78BFA)) // Orange to Purple
+        score >= 60 -> Color(0xFF60A5FA) to Brush.linearGradient(
+            colors = listOf(Color(0xFF60A5FA), Color(0xFF34D399))
+        )
+        score >= 40 -> Color(0xFFFB923C) to Brush.linearGradient(
+            colors = listOf(Color(0xFFFB923C), Color(0xFFB652F3))
+        )
+        else -> Color(0xFFEF4444) to Brush.linearGradient(
+            colors = listOf(Color(0xFFEF4444), Color(0xFFFB923C))
         )
     }
 
@@ -36,22 +41,20 @@ fun VibeMeter(
         modifier = Modifier
             .size(64.dp)
             .clip(CircleShape)
-            .background(gradient)
-            .padding(12.dp),
+            .clickable(onClick = onClick)
+            .background(Color.Black.copy(alpha = 0.5f))
+            .border(1.dp, color, CircleShape),
         contentAlignment = Alignment.Center
     ) {
-        if (score > 70) {
-            Icon(
-                imageVector = Icons.Default.Star,
-                contentDescription = "Vibe Meter",
-                tint = Color.White,
-                modifier = Modifier.size(32.dp)
-            )
-        } else {
-            Text(
-                text = score.toString(),
-                color = Color.White
-            )
-        }
+        CircularProgressIndicator(
+            progress = score / 100f,
+            modifier = Modifier.size(64.dp),
+            color = color,
+            strokeWidth = 2.dp
+        )
+        Text(
+            text = score.toString(),
+            color = Color.White
+        )
     }
 }

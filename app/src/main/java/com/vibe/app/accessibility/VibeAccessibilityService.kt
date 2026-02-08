@@ -22,6 +22,8 @@ class VibeAccessibilityService : AccessibilityService() {
     private lateinit var overlayManager: OverlayManager
     private var currentVibeScore = 100
     private var monitoringStartTime = 0L
+    private var isEditingAfterSpeedBump = false
+    private var lastTypedText = ""
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -94,7 +96,6 @@ class VibeAccessibilityService : AccessibilityService() {
             if (isInputField(source)) {
                 val inputText = source.text?.toString() ?: ""
                 if (inputText.isNotEmpty()) {
-                    Log.d(TAG, "⌨️ Input field changed: ${inputText.take(50)}...")
                     onInputFieldChanged(inputText)
                 }
             }
@@ -186,7 +187,7 @@ class VibeAccessibilityService : AccessibilityService() {
         processedMessages.clear()
         monitoringStartTime = System.currentTimeMillis()
         overlayManager.showMonitoringActive()
-        overlayManager.showVibeMeter(SentimentCategory.NEUTRAL, currentVibeScore)
+        overlayManager.showVibeMeter(currentVibeScore)
     }
 
     private fun onWhatsAppClosed() {
@@ -197,28 +198,67 @@ class VibeAccessibilityService : AccessibilityService() {
     }
 
     private fun onInputFieldChanged(text: String) {
-        Log.d(TAG, "📝 Input field changed - should analyze sentiment")
+        if (isEditingAfterSpeedBump) {
+            lastTypedText = text
+            return
+        }
+
+        val analysisResult = messageAnalyzer.analyzeMessage(text, MessageDirection.OUTGOING, Rect())
+        if (analysisResult.sentiment == SentimentCategory.TOXIC || analysisResult.sentiment == SentimentCategory.VIOLENCE) {
+            isEditingAfterSpeedBump = true
+            lastTypedText = text
+            overlayManager.showSpeedBump(
+                onEdit = { 
+                    overlayManager.hideOverlay()
+                },
+                onSend = {
+                    findSendButton()?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    overlayManager.hideOverlay()
+                    isEditingAfterSpeedBump = false
+                }
+            )
+        }
+    }
+
+    private fun findSendButton(): AccessibilityNodeInfo? {
+        val rootNode = rootInActiveWindow ?: return null
+        val sendButtons = rootNode.findAccessibilityNodeInfosByViewId("com.whatsapp:id/send")
+        return sendButtons.firstOrNull()
     }
 
     private fun onMessageDetected(analysisResult: MessageAnalysisResult) {
         Log.d(TAG, "📊 Message analyzed - Sentiment: ${analysisResult.sentiment}, Score Change: ${analysisResult.sentimentScore}")
 
-        if (analysisResult.sentimentScore != 0.0f) {
-            currentVibeScore = (currentVibeScore + analysisResult.sentimentScore).toInt().coerceIn(0, 100)
+        if (isEditingAfterSpeedBump && analysisResult.direction == MessageDirection.OUTGOING) {
+            val previousSentiment = messageAnalyzer.analyzeMessage(lastTypedText, MessageDirection.OUTGOING, Rect()).sentiment
+            if ((previousSentiment == SentimentCategory.TOXIC || previousSentiment == SentimentCategory.VIOLENCE) && analysisResult.sentiment == SentimentCategory.SUPPORTIVE) {
+                overlayManager.showVibeSpark()
+                currentVibeScore = (currentVibeScore + 10).coerceIn(0, 100) // Bonus points for editing
+            } else {
+                currentVibeScore = (currentVibeScore + analysisResult.sentimentScore).toInt().coerceIn(0, 100)
+            }
+            isEditingAfterSpeedBump = false
+        } else {
+            if (analysisResult.sentimentScore != 0.0f) {
+                currentVibeScore = (currentVibeScore + analysisResult.sentimentScore).toInt().coerceIn(0, 100)
+            }
         }
 
-        overlayManager.showVibeMeter(analysisResult.sentiment, currentVibeScore)
+        overlayManager.showVibeMeter(currentVibeScore)
 
-        when (analysisResult.sentiment) {
-            SentimentCategory.VIOLENCE, SentimentCategory.TOXIC, SentimentCategory.AGGRESSIVE -> {
-                overlayManager.showOverlay(analysisResult)
+        // Show overlays for incoming messages or supportive outgoing messages
+        if (analysisResult.direction == MessageDirection.INCOMING) {
+             when (analysisResult.sentiment) {
+                SentimentCategory.VIOLENCE, SentimentCategory.TOXIC, SentimentCategory.AGGRESSIVE -> {
+                    overlayManager.showOverlay(analysisResult)
+                }
+                SentimentCategory.SUPPORTIVE -> {
+                    overlayManager.showVibeSpark()
+                }
+                else -> overlayManager.hideOverlay()
             }
-            SentimentCategory.SUPPORTIVE -> {
-                overlayManager.showVibeSpark()
-            }
-            else -> {
-                overlayManager.hideOverlay()
-            }
+        } else if (analysisResult.sentiment == SentimentCategory.SUPPORTIVE && !isEditingAfterSpeedBump) {
+             overlayManager.showVibeSpark()
         }
     }
 
